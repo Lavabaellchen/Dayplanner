@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Minimal Day Planner</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      max-width: 600px;
+    }
+    h1, h2, h3 {
+      margin-top: 1rem;
+    }
+    textarea {
+      width: 100%;
+      height: 100px;
+    }
+    button {
+      margin: 10px 0;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    #plan {
+      background: #f9f9f9;
+      padding: 10px;
+      margin-top: 1rem;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Minimal Day Planner</h1>
+
+<!-- 1. To-Do-Liste eingeben -->
+<h2>To-Do-Liste</h2>
+<textarea id="todoInput" placeholder="Jede Aufgabe in eine neue Zeile ..."></textarea>
+<br/>
+<button id="saveTodos">To-Dos speichern</button>
+
+<!-- 2. Feste Termine eingeben -->
+<h2>Feste Termine</h2>
+<textarea id="apptInput" placeholder="Format: HH:MM-HH:MM Beschreibung&#10;z.B. 09:00-10:00 Meeting"></textarea>
+<br/>
+<button id="saveAppts">Termine speichern</button>
+
+<!-- 3. Plan generieren -->
+<h2>Plan generieren</h2>
+<label for="startTime">Startzeit:</label>
+<input type="time" id="startTime" value="08:00">
+<label for="endTime">Endzeit:</label>
+<input type="time" id="endTime" value="18:00">
+<br/><br/>
+<button id="generatePlan">Tag planen</button>
+
+<!-- 4. Ausgabe des Plans -->
+<div id="plan">
+  <h3>Geplanter Tag</h3>
+  <div id="planOutput">Noch kein Plan erzeugt.</div>
+</div>
+
+<script>
+  // -------------------------------
+  //   1. Lokalen Speicher nutzen
+  // -------------------------------
+  const todoInput = document.getElementById("todoInput");
+  const apptInput = document.getElementById("apptInput");
+  const planOutput = document.getElementById("planOutput");
+
+  // Daten beim Laden wiederherstellen
+  window.addEventListener("load", () => {
+    const savedTodos = localStorage.getItem("myTodos");
+    const savedAppts = localStorage.getItem("myAppts");
+    if (savedTodos) todoInput.value = savedTodos;
+    if (savedAppts) apptInput.value = savedAppts;
+  });
+
+  // Buttons zum Speichern
+  document.getElementById("saveTodos").addEventListener("click", () => {
+    localStorage.setItem("myTodos", todoInput.value);
+    alert("To-Dos gespeichert!");
+  });
+  document.getElementById("saveAppts").addEventListener("click", () => {
+    localStorage.setItem("myAppts", apptInput.value);
+    alert("Termine gespeichert!");
+  });
+
+  // -------------------------------
+  //   2. Planungslogik
+  // -------------------------------
+  function parseTime(timeStr) {
+    // Erzeugt ein Date-Objekt "heute, HH:MM"
+    const [hour, minute] = timeStr.split(":").map(Number);
+    const now = new Date();
+    now.setHours(hour, minute, 0, 0);
+    return now;
+  }
+
+  // Beispiel: "09:00-10:00 Meeting"
+  function parseAppointments(rawText) {
+    const lines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
+    const appointments = [];
+    for (const line of lines) {
+      const [timeRange, desc] = line.split(" ", 2);
+      if (!timeRange || !desc) continue;
+      const [startStr, endStr] = timeRange.split("-");
+      const start = parseTime(startStr);
+      const end = parseTime(endStr);
+      appointments.push({ start, end, desc });
+    }
+    // Chronologisch sortieren
+    appointments.sort((a, b) => a.start - b.start);
+    return appointments;
+  }
+
+  function generatePlan() {
+    // 1) Eingaben holen
+    const todos = todoInput.value.split("\n").map(t => t.trim()).filter(Boolean);
+    const appointments = parseAppointments(apptInput.value);
+
+    const startTime = parseTime(document.getElementById("startTime").value);
+    const endTime = parseTime(document.getElementById("endTime").value);
+
+    // 2) Aktueller Zeiger = Startzeit
+    let current = new Date(startTime);
+    const schedule = [];
+
+    let todoIndex = 0;
+
+    // Hilfsfunktion, um Zeit + x Minuten zu erhalten
+    function addMinutes(date, min) {
+      return new Date(date.getTime() + min * 60000);
+    }
+
+    // 3) Durch alle Termine iterieren
+    for (const appt of appointments) {
+      if (current >= endTime) break;
+
+      // Freie Zeit bis zum nächsten Termin
+      if (appt.start > current) {
+        // In diese Lücke To-Dos einplanen (einfache Block-Einteilung, z.B. 60 min pro To-Do)
+        while (todoIndex < todos.length && current < appt.start) {
+          const nextEnd = addMinutes(current, 60);
+          let blockEnd = nextEnd < appt.start ? nextEnd : appt.start;
+          if (blockEnd > endTime) blockEnd = endTime;
+
+          schedule.push({
+            start: new Date(current),
+            end: new Date(blockEnd),
+            desc: "TODO: " + todos[todoIndex]
+          });
+          todoIndex++;
+          current = blockEnd;
+          if (current >= appt.start || current >= endTime) break;
+        }
+      }
+
+      // Termin einplanen
+      if (appt.start < endTime) {
+        const realStart = appt.start < current ? current : appt.start; 
+        const realEnd = appt.end > endTime ? endTime : appt.end;
+        if (realStart < realEnd) {
+          schedule.push({
+            start: new Date(realStart),
+            end: new Date(realEnd),
+            desc: "Termin: " + appt.desc
+          });
+        }
+      }
+      current = appt.end > current ? appt.end : current;
+    }
+
+    // 4) Nach letzten Termin Zeit bis Tagesende nutzen
+    while (todoIndex < todos.length && current < endTime) {
+      const nextEnd = addMinutes(current, 60);
+      let blockEnd = nextEnd < endTime ? nextEnd : endTime;
+      schedule.push({
+        start: new Date(current),
+        end: new Date(blockEnd),
+        desc: "TODO: " + todos[todoIndex]
+      });
+      todoIndex++;
+      current = blockEnd;
+      if (current >= endTime) break;
+    }
+
+    // 5) Ausgabe zusammenbauen
+    let resultHtml = "";
+    if (schedule.length === 0) {
+      resultHtml = "<p>Keine Aufgaben oder Termine geplant.</p>";
+    } else {
+      resultHtml += "<ul>";
+      schedule.forEach(item => {
+        const startStr = item.start.toTimeString().slice(0,5); 
+        const endStr   = item.end.toTimeString().slice(0,5);
+        resultHtml += `<li><strong>${startStr}–${endStr}</strong>: ${item.desc}</li>`;
+      });
+      resultHtml += "</ul>";
+    }
+    planOutput.innerHTML = resultHtml;
+  }
+
+  // Button “Tag planen” -> Generate
+  document.getElementById("generatePlan").addEventListener("click", generatePlan);
+</script>
+
+</body>
+</html>
